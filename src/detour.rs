@@ -8,6 +8,8 @@ use core::ops::{Deref, DerefMut};
 use core::pin::Pin;
 use core::task::{Context, Poll};
 
+use hyper::client::connect::{Connection, Connected};
+
 // a magic that tells you if a tls record is client hello (3 comparisons!)
 fn is_hello(data: &[u8]) -> bool {
     // conent_type == handshake && handshake_type == client_hello
@@ -93,6 +95,12 @@ impl<T: AsyncWrite> Deref for Detour<T> {
 impl<T: AsyncWrite> DerefMut for Detour<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.sock
+    }
+}
+
+impl<T: AsyncWrite + Connection> Connection for Detour<T> {
+    fn connected(&self) -> Connected {
+        self.sock.connected()
     }
 }
 
