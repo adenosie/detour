@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 //! # hyper-tls
 //!
 //! An HTTPS connector to be used with [hyper][].
@@ -30,6 +34,8 @@ pub extern crate native_tls;
 
 pub use client::{HttpsConnecting, HttpsConnector};
 pub use stream::{MaybeHttpsStream, TlsStream};
+pub use detour::Detour;
 
 mod client;
 mod stream;
+mod detour;

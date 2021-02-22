@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
@@ -8,6 +12,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_native_tls::TlsConnector;
 
 use crate::stream::MaybeHttpsStream;
+use crate::detour::Detour;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -106,9 +111,9 @@ where
     T::Future: Send + 'static,
     T::Error: Into<BoxError>,
 {
-    type Response = MaybeHttpsStream<T::Response>;
+    type Response = MaybeHttpsStream<Detour<T::Response>>;
     type Error = BoxError;
-    type Future = HttpsConnecting<T::Response>;
+    type Future = HttpsConnecting<Detour<T::Response>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         match self.http.poll_ready(cx) {
@@ -134,7 +139,11 @@ where
         let tls = self.tls.clone();
         let fut = async move {
             let tcp = connecting.await.map_err(Into::into)?;
+            // modified here; simple!
+            let tcp = Detour::new(tcp);
+
             let maybe = if is_https {
+
                 let tls = tls.connect(&host, tcp).await?;
                 MaybeHttpsStream::Https(tls)
             } else {
