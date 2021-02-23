@@ -2,6 +2,8 @@
 
 this is a fork of [hyper-tls](https://github.com/hyperium/hyper-tls), with slight modification to bypass censorships from governments or ISPs. the modified part is licensed under Mozilla Public License Version 2.0. see [LICENSE](LICENSE) for full license.
 
+thanks to [Sean McArthur](https://github.com/seanmonstar), the original author of hyper-tls.
+
 below is the original readme. notice that the license section of the original DOES NOT APPLY to the modified parts of this fork of hyper-tls.
 
 # hyper-tls
