@@ -147,6 +147,7 @@ impl<T: AsyncWrite> AsyncWrite for Detour<T> {
                         // can't move out of second so it's the only option...
                         let second = second.clone();
                         _self.state = DetourState::SendSecond(second, n);
+                        cx.waker().wake_by_ref();
                         Poll::Pending
                     },
                     others => others
