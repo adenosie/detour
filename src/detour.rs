@@ -10,27 +10,86 @@ use core::task::{Context, Poll};
 
 use hyper::client::connect::{Connection, Connected};
 
-// a magic that tells you if a tls record is client hello (3 comparisons!)
+// TLS protocol reference from RFC 8446
+
+// a magic that tells you if a tls record is client hello (2 comparisons!)
 fn is_hello(data: &[u8]) -> bool {
-    // conent_type == handshake && handshake_type == client_hello
-    data.len() > 5 && data[0] == 0x16 && data[5] == 0x01
+    // type == handshake && msg_type == client_hello
+    data[0] == 0x16 && data[5] == 0x01
+}
+
+// find where to cut
+fn find_sni(data: &[u8]) -> Option<usize> {
+    // uint16 ProtocolVersion;
+    // opaque Random[32];
+    //
+    // uint8 CipherSuite[2];    /* Cryptographic suite selector */
+    //
+    // struct {
+    //     ProtocolVersion legacy_version = 0x0303;    /* TLS v1.2 */
+    //     Random random;
+    //     opaque legacy_session_id<0..32>;
+    //     CipherSuite cipher_suites<2..2^16-2>;
+    //     opaque legacy_compression_methods<1..2^8-1>;
+    //     Extension extensions<8..2^16-1>;
+    // } ClientHello;
+
+    // skip all headers we're not interested in
+
+    fn u16_at(data: &[u8], at: usize) -> u16 {
+        let arr = [data[at], data[at + 1]];
+        u16::from_be_bytes(arr)
+    }
+
+    // skip up to `random`
+    let mut offset = 5 + 4 + 2 + 32;
+
+    // legacy_session_id
+    offset += 1 + data[offset] as usize;
+
+    // cipher_suites
+    offset += 2 + u16_at(data, offset) as usize;
+
+    // legacy_compression_methods
+    offset += 1 + data[offset] as usize;
+
+    // extensions
+    let ext_end = offset + 2 + u16_at(data, offset) as usize;
+
+    offset += 2;
+    while offset < ext_end {
+        // extension_type == server_name
+        if u16_at(data, offset) == 0u16 {
+            offset += 2;
+            let sni_len = u16_at(data, offset) as usize;
+
+            return Some(offset + sni_len / 2);
+        } else {
+            offset += 2;
+            offset += 2 + u16_at(data, offset) as usize;
+        }
+    }
+
+    None
 }
 
 // split a tls record half into fragments.
 // if multiple tls records of same type are send, the server should
 // identify them as 'fragmented' and reassemble them up to a single record.
-//
-// see [https://tools.ietf.org/html/rfc8446#section-5] for more detail.
 fn fragmentate(data: &[u8]) -> (Vec<u8>, Vec<u8>) {
-    // a header of an TLSPlaintext is 5 bytes length. its content are
-    // content type(1 byte), protocol version(2 bytes), fragment length(2 bytes)
-    assert!(data.len() > 5);
+    // struct {
+    //     ContentType type;
+    //     ProtocolVersion legacy_record_version;
+    //     uint16 length;
+    //     opaque fragment[TLSPlaintext.length];
+    // } TLSPlaintext; (Vec<u8>, Vec<u8>) {
 
     // split the payload into half
-    let (left, right) = data.split_at(5 + (data.len() - 5) / 2);
-    
-    // we'll keep record type and protocol version as same as original,
-    // but the payload length will be changed to the chunk's size.
+    let mid = find_sni(data).unwrap_or(5 + (data.len() - 5) / 2);
+    let (left, right) = data.split_at(mid);
+
+    // we'll keep `type` and `legacy_record_version` as same as original,
+    // but `length` will be changed to the chunk's size.
 
     // left contains header; payload length is len - 5
     let size_bytes = ((left.len() - 5) as u16).to_be_bytes();
@@ -76,9 +135,13 @@ impl<T: AsyncWrite> Detour<T> {
     }
 
     // consume a pin to self into a pin to sock
-    // we know it's safe since self.sock never moves
     fn sock(self: Pin<&mut Self>) -> Pin<&mut T> {
         unsafe { Pin::new_unchecked(&mut self.get_unchecked_mut().sock) }
+    }
+
+    /// consume self, return inner socket
+    pub fn into_inner(self) -> T {
+        self.sock
     }
 }
 
@@ -90,8 +153,6 @@ impl<T: AsyncWrite> Deref for Detour<T> {
     }
 }
 
-// i'm in doubt if i should implement this... things would be
-// easily broken if it's interrupted between sending fragments
 impl<T: AsyncWrite> DerefMut for Detour<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.sock
